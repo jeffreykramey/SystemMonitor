@@ -1,0 +1,3 @@
+steam.exe
+notepad.exe
+Calculator.exe
