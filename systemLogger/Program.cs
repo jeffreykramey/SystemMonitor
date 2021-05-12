@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Windows.Forms;
 using System.Collections.Generic;
 using System.IO;
 using System.Management;
@@ -10,10 +11,10 @@ namespace systemLogger
 {
     class Program
     {
-        static DateTime startTime, endTime;
+        //static DateTime startTime, endTime;
        // static String currApp;
         static HashSet<String> appsToWatch = new HashSet<string>(File.ReadAllLines(@"C:\Users\jeffr\Code\systemLogger\systemLogger\appsToWatch.txt"));
-        static HashSet<String> runningApps = new HashSet<string>();
+        static Dictionary<string, TargetProcess> runningApps = new Dictionary<string, TargetProcess>();
         static String csvFileDir, logFilesPath, niceHashFilePath;
 
         
@@ -22,6 +23,12 @@ namespace systemLogger
 
         static void Main(string[] args)
         {
+            NotifyIcon tray = new NotifyIcon();
+            tray.Icon = new System.Drawing.Icon(@"C:\Users\jeffr\Code\systemLogger\systemLogger\pussyCat.ico");
+            tray.Visible = true;
+            tray.BalloonTipText = "meow";
+            tray.ShowBalloonTip(1);
+
             string configFilePath = Path.Combine(Environment.CurrentDirectory, @"LogFiles\config.txt");
             if (!File.Exists(configFilePath))
             {
@@ -36,11 +43,11 @@ namespace systemLogger
             try
             {
                 ManagementEventWatcher startWatch = new ManagementEventWatcher(new WqlEventQuery("SELECT * FROM Win32_ProcessStartTrace"));
-                startWatch.EventArrived += new EventArrivedEventHandler(startMonitoringProcess);
+                startWatch.EventArrived += new EventArrivedEventHandler(startWatchingApp);
                 startWatch.Start();
                 ManagementEventWatcher stopWatch = new ManagementEventWatcher(
                 new WqlEventQuery("SELECT * FROM Win32_ProcessStopTrace"));
-                stopWatch.EventArrived += new EventArrivedEventHandler(stopMonitoringProcess);
+                stopWatch.EventArrived += new EventArrivedEventHandler(stopWatchingApp);
                 stopWatch.Start();
                 Console.WriteLine("Press any key to exit");
                 while (!Console.KeyAvailable) System.Threading.Thread.Sleep(50);
@@ -54,52 +61,58 @@ namespace systemLogger
             }
         }
 
-        static void startMonitoringProcess(object sender, EventArrivedEventArgs e)
+        static void startWatchingApp(object sender, EventArrivedEventArgs e)
         {
             String processName = (String)e.NewEvent.Properties["ProcessName"].Value;
             if (appsToWatch.Contains(processName))
             {
-                runningApps.Add(processName);
-                //currApp = processName;
-                startTime = DateTime.Now;
-                Console.WriteLine("Found Target: {0}", processName);
+                if (!runningApps.ContainsKey(processName))
+                {
+                    runningApps.Add(processName, new TargetProcess());
+                    //currApp = processName;
+                    //startTime = DateTime.Now;
+                    Console.WriteLine("Found Target: {0}", processName);
+                }
+                else
+                {
+                    runningApps[processName].incrementInstanceCount();
+                }
+                killMiner();
             }
             Console.WriteLine("Process started: {0}", processName);
+            
 
         }
 
-        static void stopMonitoringProcess(object sender, EventArrivedEventArgs e)
+        static void stopWatchingApp(object sender, EventArrivedEventArgs e)
         {
             String processName = (String)e.NewEvent.Properties["ProcessName"].Value;
-            //if (currApp == processName)
-            if(appsToWatch.Contains(processName))
+            if(runningApps.ContainsKey(processName))
             {
-                Console.WriteLine("Process stopped: {0}", processName);
-                appsToWatch.Remove(processName);
-                //processName = null;
-                endTime = DateTime.Now;
-                int numDaysLogged = endTime.DayOfYear - startTime.DayOfYear; //covers cases where monitoring covers multi-day periods    
-                for(int i = 0; i <= numDaysLogged; i++)
+                TargetProcess tp = runningApps[processName];
+                tp.decrementInstanceCount();
+                if (tp.getInstanceCount() <= 0)
                 {
-                    double cpuLoadAvg = 0, gpuLoadAvg = 0, readingCount = 0, cpuMax = 0, cpuTempAvg = 0, gpuMax = 0, gpuTempAvg = 0;
-                    string csvFilePath = buildCsvFilePath(startTime, i);
-                    TextFieldParser parser = initializeParser(csvFilePath);
-                    parseComponentReadings(ref parser, readingCount, ref cpuMax, ref cpuTempAvg, ref cpuLoadAvg, ref gpuMax, ref gpuTempAvg, ref gpuLoadAvg);
-                    
-                    finalizeComponentDataCalculations(readingCount, ref cpuTempAvg, ref cpuLoadAvg, ref gpuTempAvg, ref gpuLoadAvg);
-                    var sessionLength = (endTime - startTime);
-                    writeToLog(processName, cpuMax, cpuTempAvg, cpuLoadAvg, gpuMax, gpuTempAvg, gpuLoadAvg, sessionLength);
-
-
+                    Console.WriteLine("Process stopped: {0}", processName);
+                    runningApps.Remove(processName);
+                    tp.setEndTime();
+                    int numDaysLogged = tp.getEndTime().DayOfYear - tp.getStartTime().DayOfYear; //covers cases where monitoring covers multi-day periods    
+                    for (int i = 0; i <= numDaysLogged; i++)
+                    {
+                        string csvFilePath = buildCsvFilePath(tp.getStartTime(), i);
+                        TextFieldParser parser = initCsvParser(csvFilePath);
+                        parseComponentReadings(ref parser, ref tp);
+                        tp.averageTempAndLoadData();
+                        writeToLog(processName, tp);
+                     }
                 }
-
+                startMiner();
             }
         }
         
         static public void startMiner()
         {
             Process[] pname = Process.GetProcessesByName("NiceHashQuickMiner");
-            
             if (pname.Length == 0)
             {
                 using (Process quickMiner = new Process())
@@ -113,6 +126,52 @@ namespace systemLogger
             else
             {
                 Console.WriteLine("NiceHash is already running");
+            }
+        }
+
+        static public void killMiner()
+        {
+            Process[] quickMiner = Process.GetProcessesByName("NiceHashQuickMiner");
+            Process[] excavator = Process.GetProcessesByName("excavator");
+
+            quickMiner[0].Close();
+            excavator[0].Close();
+            foreach (var process in Process.GetProcessesByName("NiceHashQuickMiner"))
+            {
+                killTheFamily(process.Id);
+                //process.CloseMainWindow();
+                //process.Kill();
+                Console.WriteLine("killing {0}", process.ProcessName);
+            }
+        }
+
+        static void killTheFamily(int pid)
+        {
+            ManagementObjectSearcher processSearcher = new ManagementObjectSearcher
+                    ("Select * From Win32_Process Where ParentProcessID=" + pid);
+            ManagementObjectCollection processCollection = processSearcher.Get();
+
+            try
+            {
+                Process proc = Process.GetProcessById(pid);
+                if (!proc.HasExited)
+                {
+                    Console.WriteLine("had to kill {0} ", proc.ProcessName);
+                    proc.Kill();
+                }
+                    
+            }
+            catch (ArgumentException)
+            {
+                // Process already exited.
+            }
+
+            if (processCollection != null)
+            {
+                foreach (ManagementObject manObj in processCollection)
+                {
+                    killTheFamily(Convert.ToInt32(manObj["ProcessID"])); //kill child processes(also kills childrens of childrens etc.)
+                }
             }
         }
 
@@ -131,29 +190,50 @@ namespace systemLogger
         }
 
 
-        static public void parseComponentReadings(ref TextFieldParser parser, double readingCount, ref double cpuMax, ref double cpuTempAvg, ref double cpuLoadAvg, ref double gpuMax, ref double gpuTempAvg, ref double gpuLoadAvg)
+        static public void parseComponentReadings(ref TextFieldParser parser, ref TargetProcess tp)
         {
             while (!parser.EndOfData)
             {
                 String[] row = parser.ReadFields();
                 DateTime rowTime = DateTime.ParseExact(row[0], "MM/dd/yyyy HH:mm:ss", CultureInfo.InvariantCulture);
-                if (rowTime >= startTime) //check for times within current app session
+                if (rowTime >= tp.getStartTime()) //check for times within current app session
                 {
-                    if (rowTime > endTime)
+                    if (rowTime > tp.getEndTime())
                     {
                         break;
                     }
-                    readingCount++;
-                    updateComponentVars(row, ref cpuMax, ref cpuTempAvg, ref cpuLoadAvg, ref gpuMax, ref gpuTempAvg, ref gpuLoadAvg);
+                    tp.incrementNumReadings(); //numReadings will be used to calculate averages upon final calculations
+                    updateComponentVars(row, ref tp);
                 }
 
             }
         }
 
-
-        static public TextFieldParser initializeParser(string csvFilePath)
+        static public void updateComponentVars(string[] row, ref TargetProcess tp)
         {
-            TextFieldParser parser = new TextFieldParser(csvFilePath);
+            int rowCpuTemp = Int32.Parse(row[18]);
+            int rowGpuTemp = Int32.Parse(row[35]);
+            tp.updateTemperatures(rowCpuTemp, rowGpuTemp);
+            double cpuLoad = Convert.ToDouble(row[9]);
+            double gpuLoad= Convert.ToDouble(row[39]);
+            tp.addToLoadData(cpuLoad, gpuLoad);
+        }
+
+        //getting infinity for calculations, maybe need to add each reading to an array for each process?
+        //static public void finalizeComponentDataCalculations(ref TargetProcess tp)
+        //{
+        //    cpuTempAvg /= readingCount;
+        //    cpuLoadAvg /= readingCount;
+        //    gpuTempAvg /= readingCount;
+        //    gpuLoadAvg /= readingCount;
+        //}
+
+
+        static public TextFieldParser initCsvParser(string csvFilePath)
+        {
+            TextFieldParser parser = new TextFieldParser(csvFilePath); //Better to store the entire config file into hashMap for easy lookup
+            
+            
             parser.SetDelimiters(",");
             parser.ReadLine(); //skip first header
             parser.ReadLine(); //skip second header
@@ -180,41 +260,21 @@ namespace systemLogger
         }
 
 
-        static public void writeToLog(string currApp, double cpuMax, double cpuTempAvg, double cpuLoadAvg, double gpuMax, double gpuTempAvg, double gpuLoadAvg, TimeSpan sessionLength)
+        static public void writeToLog(string processName, TargetProcess tp)
         {
-            string filePath = logFilesPath + @"\" + currApp[0..^4] + ".txt";
-            using (StreamWriter writer = File.AppendText(filePath))
-            {
-                writer.WriteLine("{0} -- CPU Max Temp: {1}; CPU Avg Temp: {2}; CPU Avg Load: {3}%; GPU Max Temp: {4}; GPU Avg Temp: {5}; GPU Avg Load: {6}%; Session Length: {7} hours, {8} minutes",
-                endTime.ToShortDateString(), cpuMax, Math.Round(cpuTempAvg, 0), Math.Round(cpuLoadAvg, 2), gpuMax, Math.Round(gpuTempAvg, 0), Math.Round(gpuLoadAvg, 2), sessionLength.Hours, sessionLength.Minutes);
-            }
+            string filePath = logFilesPath + @"\" + processName[0..^4] + ".txt";
+            tp.writeToLogFile(filePath);
         }
+
         static public string buildCsvFilePath(DateTime startTime, int i)
         {
             var addDayToStartTime = startTime.AddDays(i);
             return csvFileDir + @"\OpenHardwareMonitorLog-" + addDayToStartTime.ToString("yyyy-MM-dd") + @".csv";
         }
 
-        static public void updateComponentVars(string[] row, ref double cpuMax, ref double cpuTempAvg, ref double cpuLoadAvg, ref double gpuMax, ref double gpuTempAvg, ref double gpuLoadAvg)
-        {
-            int rowCpuTemp = Int32.Parse(row[18]);
-            cpuMax = Math.Max(cpuMax, rowCpuTemp);
-            cpuTempAvg += rowCpuTemp;
-            cpuLoadAvg += Convert.ToDouble(row[9]);
-            int rowGpuTemp = Int32.Parse(row[35]);
-            gpuMax = Math.Max(gpuMax, rowGpuTemp);
-            gpuTempAvg += rowGpuTemp;
-            gpuLoadAvg += Convert.ToDouble(row[39]);
-        }
 
-        //getting infinity for calculations, maybe need to add each reading to an array for each process?
-        static public void finalizeComponentDataCalculations(double readingCount, ref double cpuTempAvg, ref double cpuLoadAvg, ref double gpuTempAvg, ref double gpuLoadAvg)
-        {
-            cpuTempAvg /= readingCount;
-            cpuLoadAvg /= readingCount;
-            gpuTempAvg /= readingCount;
-            gpuLoadAvg /= readingCount;
-        }
+
+        
     }
 }
 
