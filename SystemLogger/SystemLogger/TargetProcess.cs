@@ -1,9 +1,7 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.IO;
-using System.Text;
 
-namespace systemLogger
+namespace SystemLogger
 {
     public class TargetProcess //represents one of the classes in the apps watch list
     {

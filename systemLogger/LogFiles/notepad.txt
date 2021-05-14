@@ -1,2 +1,0 @@
-5/4/2021 -- CPU Max Temp: 40; CPU Avg Temp: 38; CPU Avg Load: 2.59%; GPU Max Temp: 57; GPU Avg Temp: 57; GPU Avg Load: 98.5%; Session Length: 0 hours, 0 minutes
-5/4/2021 -- CPU Max Temp: 35; CPU Avg Temp: 35; CPU Avg Load: 2.15%; GPU Max Temp: 57; GPU Avg Temp: 57; GPU Avg Load: 98%; Session Length: 0 hours, 0 minutes

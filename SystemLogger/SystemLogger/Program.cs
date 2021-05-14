@@ -7,37 +7,34 @@ using Microsoft.VisualBasic.FileIO;
 using System.Diagnostics;
 using System.Globalization;
 
-namespace systemLogger
+namespace SystemLogger
 {
     class Program
     {
-        //static DateTime startTime, endTime;
-       // static String currApp;
-        static HashSet<String> appsToWatch = new HashSet<string>(File.ReadAllLines(@"C:\Users\jeffr\Code\systemLogger\systemLogger\appsToWatch.txt"));
+        static HashSet<String> appsToWatch = new HashSet<string>(File.ReadAllLines(Path.Combine(Environment.CurrentDirectory, @"appsToWatch.txt")));
         static Dictionary<string, TargetProcess> runningApps = new Dictionary<string, TargetProcess>();
-        static String csvFileDir, logFilesPath, niceHashFilePath;
-
-        
-
-
+        static String csvFileDir, logFilesPath, niceHashFilePath = null;
 
         static void Main(string[] args)
         {
             NotifyIcon tray = new NotifyIcon();
-            tray.Icon = new System.Drawing.Icon(@"C:\Users\jeffr\Code\systemLogger\systemLogger\pussyCat.ico");
+            tray.Icon = new System.Drawing.Icon(Path.Combine(Environment.CurrentDirectory, @"pussyCat.ico"));
+            
             tray.Visible = true;
             tray.BalloonTipText = "meow";
             tray.ShowBalloonTip(1);
 
+            Directory.CreateDirectory("LogFiles"); //make a logFiles dir if it doesn't already exist
             string configFilePath = Path.Combine(Environment.CurrentDirectory, @"LogFiles\config.txt");
             if (!File.Exists(configFilePath))
             {
-                var formProcess = Process.Start(Path.Combine(Environment.CurrentDirectory, @"configInit\configInit.exe"));
+                var formProcess = Process.Start(Path.Combine(Environment.CurrentDirectory, @"ConfigInit\ConfigInit.exe"));
                 formProcess.WaitForExit();
             }
             parseFilePaths(configFilePath);
             startOpenHwMonitor();
             startMiner();
+            
             ManagementScope scope = new ManagementScope(Environment.MachineName + @"\root\cimv2"); 
             scope.Options.EnablePrivileges = true;
             try
@@ -69,9 +66,9 @@ namespace systemLogger
                 if (!runningApps.ContainsKey(processName))
                 {
                     runningApps.Add(processName, new TargetProcess());
-                    //currApp = processName;
-                    //startTime = DateTime.Now;
-                    Console.WriteLine("Found Target: {0}", processName);
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine("Found Target Process: {0}", processName);
+                    Console.ForegroundColor = ConsoleColor.White;
                 }
                 else
                 {
@@ -79,7 +76,11 @@ namespace systemLogger
                 }
                 killMiner();
             }
-            Console.WriteLine("Process started: {0}", processName);
+            else
+            {
+                Console.WriteLine("Process started: {0}", processName);
+            }
+            
             
 
         }
@@ -93,7 +94,10 @@ namespace systemLogger
                 tp.decrementInstanceCount();
                 if (tp.getInstanceCount() <= 0)
                 {
-                    Console.WriteLine("Process stopped: {0}", processName);
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine("Killing Target Process: {0}", processName);
+                    Console.ForegroundColor = ConsoleColor.White;
+                    
                     runningApps.Remove(processName);
                     tp.setEndTime();
                     int numDaysLogged = tp.getEndTime().DayOfYear - tp.getStartTime().DayOfYear; //covers cases where monitoring covers multi-day periods    
@@ -108,10 +112,19 @@ namespace systemLogger
                 }
                 startMiner();
             }
+            else
+            {
+                Console.WriteLine("Process stopped: {0}", processName);
+            }
+            
         }
         
         static public void startMiner()
         {
+            if(niceHashFilePath == null)
+            {
+                return;
+            }
             Process[] pname = Process.GetProcessesByName("NiceHashQuickMiner");
             if (pname.Length == 0)
             {
@@ -131,6 +144,10 @@ namespace systemLogger
 
         static public void killMiner()
         {
+            if (niceHashFilePath == null)
+            {
+                return;
+            }
             Process[] quickMiner = Process.GetProcessesByName("NiceHashQuickMiner");
             Process[] excavator = Process.GetProcessesByName("excavator");
 
@@ -141,7 +158,6 @@ namespace systemLogger
                 killTheFamily(process.Id);
                 //process.CloseMainWindow();
                 //process.Kill();
-                Console.WriteLine("killing {0}", process.ProcessName);
             }
         }
 
@@ -156,7 +172,6 @@ namespace systemLogger
                 Process proc = Process.GetProcessById(pid);
                 if (!proc.HasExited)
                 {
-                    Console.WriteLine("had to kill {0} ", proc.ProcessName);
                     proc.Kill();
                 }
                     
@@ -170,7 +185,7 @@ namespace systemLogger
             {
                 foreach (ManagementObject manObj in processCollection)
                 {
-                    killTheFamily(Convert.ToInt32(manObj["ProcessID"])); //kill child processes(also kills childrens of childrens etc.)
+                    killTheFamily(Convert.ToInt32(manObj["ProcessID"])); //recursivley kill the child processes
                 }
             }
         }
@@ -219,16 +234,6 @@ namespace systemLogger
             tp.addToLoadData(cpuLoad, gpuLoad);
         }
 
-        //getting infinity for calculations, maybe need to add each reading to an array for each process?
-        //static public void finalizeComponentDataCalculations(ref TargetProcess tp)
-        //{
-        //    cpuTempAvg /= readingCount;
-        //    cpuLoadAvg /= readingCount;
-        //    gpuTempAvg /= readingCount;
-        //    gpuLoadAvg /= readingCount;
-        //}
-
-
         static public TextFieldParser initCsvParser(string csvFilePath)
         {
             TextFieldParser parser = new TextFieldParser(csvFilePath); //Better to store the entire config file into hashMap for easy lookup
@@ -248,15 +253,15 @@ namespace systemLogger
 
             csvFileDir = parser.ReadLine().Substring(12);
             Console.WriteLine("csvFilesPath {0}", csvFileDir);
-         
-            niceHashFilePath = parser.ReadLine().Substring(17);
+            if (!parser.EndOfData)
+            {
+                niceHashFilePath = parser.ReadLine().Substring(17);
+            }
+            
             if(niceHashFilePath != null)
             {
                 Console.WriteLine("niceHashFilePath {0}", niceHashFilePath);
             }
-            
-            
-            
         }
 
 
