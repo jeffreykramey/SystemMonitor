@@ -6,39 +6,91 @@ using System.Management;
 using Microsoft.VisualBasic.FileIO;
 using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.InteropServices;
+using System.Linq;
 
 namespace SystemLogger
 {
     class Program
     {
+
+        [DllImport("Kernel32")]
+        private static extern bool SetConsoleCtrlHandler(EventHandler handler, bool add);
+        private delegate bool EventHandler(CtrlType sig);
+        static EventHandler closureHandler;
+
         static HashSet<String> appsToWatch = new HashSet<string>(File.ReadAllLines(Path.Combine(Environment.CurrentDirectory, @"appsToWatch.txt")));
-        static Dictionary<string, TargetProcess> runningApps = new Dictionary<string, TargetProcess>();
+        static Dictionary<uint, TargetProcess> runningApps = new Dictionary<uint, TargetProcess>();
         static String csvFileDir, logFilesPath, niceHashFilePath = null;
+        static CsvTranslator translator;
+
+        enum CtrlType
+        {
+            CTRL_C_EVENT = 0,
+            CTRL_BREAK_EVENT = 1,
+            CTRL_CLOSE_EVENT = 2,
+            CTRL_LOGOFF_EVENT = 5,
+            CTRL_SHUTDOWN_EVENT = 6
+        }
+
+        private static bool Handler(CtrlType sig)
+        {
+            switch (sig)
+            {
+                case CtrlType.CTRL_C_EVENT:
+                    prepareProgramForClose();
+                    return true;
+                case CtrlType.CTRL_LOGOFF_EVENT:
+                    prepareProgramForClose();
+                    return true;
+                case CtrlType.CTRL_SHUTDOWN_EVENT:
+                    prepareProgramForClose();
+                    return true;
+                case CtrlType.CTRL_CLOSE_EVENT:
+                    prepareProgramForClose();
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
 
         static void Main(string[] args)
         {
+
+
+           
+
             NotifyIcon tray = new NotifyIcon();
             tray.Icon = new System.Drawing.Icon(Path.Combine(Environment.CurrentDirectory, @"pussyCat.ico"));
             
-            tray.Visible = true;
-            tray.BalloonTipText = "meow";
-            tray.ShowBalloonTip(1);
-
-            Directory.CreateDirectory("LogFiles"); //make a logFiles dir if it doesn't already exist
-            string configFilePath = Path.Combine(Environment.CurrentDirectory, @"LogFiles\config.txt");
+            string configFilePath = Path.Combine(Environment.CurrentDirectory, @"config.txt");
+            Console.WriteLine(configFilePath);
             if (!File.Exists(configFilePath))
             {
                 var formProcess = Process.Start(Path.Combine(Environment.CurrentDirectory, @"ConfigInit\ConfigInit.exe"));
                 formProcess.WaitForExit();
             }
+           
             parseFilePaths(configFilePath);
+            logFilesPath = Path.Combine(logFilesPath, "LogFiles");
+            Directory.CreateDirectory(logFilesPath); //make a LogFiles dir if it doesn't already exist
             startOpenHwMonitor();
-            startMiner();
+            bool startNiceHash = checkCurrentlyRunningProcesses(); 
+            if (startNiceHash)
+            {
+                startMiner();
+            }
             
+
             ManagementScope scope = new ManagementScope(Environment.MachineName + @"\root\cimv2"); 
             scope.Options.EnablePrivileges = true;
             try
             {
+                closureHandler += new EventHandler(Handler);
+                SetConsoleCtrlHandler(closureHandler, true);
+                ConsoleWindow.QuickEditMode(false); //turns console's quick edit mode off
+
                 ManagementEventWatcher startWatch = new ManagementEventWatcher(new WqlEventQuery("SELECT * FROM Win32_ProcessStartTrace"));
                 startWatch.EventArrived += new EventArrivedEventHandler(startWatchingApp);
                 startWatch.Start();
@@ -58,67 +110,104 @@ namespace SystemLogger
             }
         }
 
+        public static bool checkCurrentlyRunningProcesses()
+        {
+            bool ret = false;
+            Process[] allProcesses = Process.GetProcesses();
+            foreach(Process proc in allProcesses)
+            {
+                if (appsToWatch.Contains(proc.ProcessName + @".exe"))
+                {
+                    initRunningApps(proc);
+                    Console.WriteLine("{0} added to list", proc.ProcessName);
+                    ret = true;
+
+                }
+            }
+            return ret;
+        }
+
         static void startWatchingApp(object sender, EventArrivedEventArgs e)
         {
             String processName = (String)e.NewEvent.Properties["ProcessName"].Value;
+            uint pid =(uint) e.NewEvent.Properties["ProcessID"].Value;
+
             if (appsToWatch.Contains(processName))
             {
-                if (!runningApps.ContainsKey(processName))
-                {
-                    runningApps.Add(processName, new TargetProcess());
-                    Console.ForegroundColor = ConsoleColor.Green;
-                    Console.WriteLine("Found Target Process: {0}", processName);
-                    Console.ForegroundColor = ConsoleColor.White;
-                }
-                else
-                {
-                    runningApps[processName].incrementInstanceCount();
-                }
+                addProcessToRunningApps(pid, processName);
                 killMiner();
             }
             else
             {
-                Console.WriteLine("Process started: {0}", processName);
+                Console.WriteLine("Unwatched process started: {0}, {1}", processName, pid);
             }
-            
-            
 
+        }
+
+        static void initRunningApps(Process proc)
+        {
+            addProcessToRunningApps((uint) proc.Id, proc.ProcessName + @".exe");
+        }
+
+        static void addProcessToRunningApps(uint pid, string processName)
+        {
+            if (!runningApps.ContainsKey(pid))
+            {
+                runningApps.Add(pid, new TargetProcess(processName));
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine("Found Target Process: {0}, {1}", processName, pid);
+                Console.ForegroundColor = ConsoleColor.White;
+            }
         }
 
         static void stopWatchingApp(object sender, EventArrivedEventArgs e)
         {
             String processName = (String)e.NewEvent.Properties["ProcessName"].Value;
-            if(runningApps.ContainsKey(processName))
+            uint pid = (uint)e.NewEvent.Properties["ProcessID"].Value;
+            
+            if (runningApps.ContainsKey(pid))
             {
-                TargetProcess tp = runningApps[processName];
-                tp.decrementInstanceCount();
-                if (tp.getInstanceCount() <= 0)
-                {
-                    Console.ForegroundColor = ConsoleColor.Red;
-                    Console.WriteLine("Killing Target Process: {0}", processName);
-                    Console.ForegroundColor = ConsoleColor.White;
+                TargetProcess tp = runningApps[pid];
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine("Killing Target Process: {0}, {1}", processName, pid);
+                Console.ForegroundColor = ConsoleColor.White;
                     
-                    runningApps.Remove(processName);
-                    tp.setEndTime();
-                    int numDaysLogged = tp.getEndTime().DayOfYear - tp.getStartTime().DayOfYear; //covers cases where monitoring covers multi-day periods    
-                    for (int i = 0; i <= numDaysLogged; i++)
-                    {
-                        string csvFilePath = buildCsvFilePath(tp.getStartTime(), i);
-                        TextFieldParser parser = initCsvParser(csvFilePath);
-                        parseComponentReadings(ref parser, ref tp);
-                        tp.averageTempAndLoadData();
-                        writeToLog(processName, tp);
-                     }
-                }
+                runningApps.Remove(pid);
+                processEndOfWatch(tp);
                 startMiner();
             }
             else
             {
-                Console.WriteLine("Process stopped: {0}", processName);
+                Console.WriteLine("Unwatched process stopped: {0}, {1}", processName, pid);
             }
             
         }
-        
+
+        static void processEndOfWatch(TargetProcess tp)
+        {
+            tp.setEndTime();
+            int numDaysLogged = tp.getEndTime().DayOfYear - tp.getStartTime().DayOfYear; //covers cases where monitoring covers multi-day periods    
+            for (int i = 0; i <= numDaysLogged; i++)
+            {
+                string csvFilePath = buildCsvFilePath(tp.getStartTime(), i);
+                TextFieldParser parser = initCsvParser(csvFilePath);
+                Console.WriteLine(csvFilePath);
+                parseComponentReadings(ref parser, ref tp);
+                tp.averageTempAndLoadData();
+                writeToLog(tp);
+            }
+        }
+
+        static void prepareProgramForClose()
+        {
+            var keyList = runningApps.Keys.ToList();
+            foreach(var key in keyList)
+            {
+                processEndOfWatch(runningApps[key]);
+            }
+        }
+
+                
         static public void startMiner()
         {
             if(niceHashFilePath == null)
@@ -156,8 +245,6 @@ namespace SystemLogger
             foreach (var process in Process.GetProcessesByName("NiceHashQuickMiner"))
             {
                 killTheFamily(process.Id);
-                //process.CloseMainWindow();
-                //process.Kill();
             }
         }
 
@@ -189,7 +276,7 @@ namespace SystemLogger
                 }
             }
         }
-
+        
         static public void startOpenHwMonitor()
         {
             Process[] pname = Process.GetProcessesByName("OpenHardwareMonitor");
@@ -209,6 +296,7 @@ namespace SystemLogger
         {
             while (!parser.EndOfData)
             {
+               
                 String[] row = parser.ReadFields();
                 DateTime rowTime = DateTime.ParseExact(row[0], "MM/dd/yyyy HH:mm:ss", CultureInfo.InvariantCulture);
                 if (rowTime >= tp.getStartTime()) //check for times within current app session
@@ -220,29 +308,70 @@ namespace SystemLogger
                     tp.incrementNumReadings(); //numReadings will be used to calculate averages upon final calculations
                     updateComponentVars(row, ref tp);
                 }
-
             }
         }
 
         static public void updateComponentVars(string[] row, ref TargetProcess tp)
         {
-            int rowCpuTemp = Int32.Parse(row[18]);
-            int rowGpuTemp = Int32.Parse(row[35]);
+            int rowCpuTemp = Int32.Parse(row[translator.cpuTempCol]);
+            int rowGpuTemp = Int32.Parse(row[translator.gpuTempCol]);
             tp.updateTemperatures(rowCpuTemp, rowGpuTemp);
-            double cpuLoad = Convert.ToDouble(row[9]);
-            double gpuLoad= Convert.ToDouble(row[39]);
+            double cpuLoad = Convert.ToDouble(row[translator.cpuLoadCol]);
+            double gpuLoad= Convert.ToDouble(row[translator.gpuLoadCol]);
             tp.addToLoadData(cpuLoad, gpuLoad);
         }
 
         static public TextFieldParser initCsvParser(string csvFilePath)
         {
-            TextFieldParser parser = new TextFieldParser(csvFilePath); //Better to store the entire config file into hashMap for easy lookup
-            
-            
+            TextFieldParser parser = new TextFieldParser(csvFilePath);
             parser.SetDelimiters(",");
-            parser.ReadLine(); //skip first header
-            parser.ReadLine(); //skip second header
+            if (translator == null)
+            {
+                setTranslator(parser);
+            }
+            else
+            {
+                parser.ReadLine(); //skip first two header rows
+                parser.ReadLine();
+            }
             return parser;
+        }
+
+        static void setTranslator(TextFieldParser parser)
+        {
+            int gpuTempCol = -1, cpuTempCol = -1, gpuLoadCol = -1, cpuLoadCol = -1;
+            string[] coloumnHeaders_1 = parser.ReadFields();
+            string[] coloumnHeaders_2 = parser.ReadFields();
+            for(int i = 0; i < coloumnHeaders_2.Length; i++)
+            {
+                if(coloumnHeaders_2[i] == "GPU Core")
+                {
+                    if (coloumnHeaders_1[i].Contains("temperature"))
+                    {
+                        gpuTempCol = i;
+                        continue;
+                    }
+                    if (coloumnHeaders_1[i].Contains("load"))
+                    {
+                        gpuLoadCol = i;
+                        continue;
+                    }
+                }
+
+                if (coloumnHeaders_2[i] == "CPU Package" && coloumnHeaders_1[i].Contains("temperature"))
+                {
+                    cpuTempCol = i;
+                    continue;
+                }
+
+                if (coloumnHeaders_2[i] == "CPU Total" && coloumnHeaders_1[i].Contains("load")) 
+                {
+                    cpuLoadCol = i;
+                    continue;
+                }
+            }
+            translator = new CsvTranslator(gpuTempCol, cpuTempCol, gpuLoadCol, cpuLoadCol);
+            
         }
 
         static public void parseFilePaths(string configPath)
@@ -265,21 +394,27 @@ namespace SystemLogger
         }
 
 
-        static public void writeToLog(string processName, TargetProcess tp)
+        static public void writeToLog(TargetProcess tp)
         {
-            string filePath = logFilesPath + @"\" + processName[0..^4] + ".txt";
+            string filePath = logFilesPath + @"\" +tp.getPorcessName()[0..^4] + ".txt";
             tp.writeToLogFile(filePath);
+            Console.ForegroundColor = ConsoleColor.Blue;
+            Console.WriteLine("Wrote log for {0} here: {1}", tp.getPorcessName(), filePath);
+            Console.ForegroundColor = ConsoleColor.White;
+            
         }
 
         static public string buildCsvFilePath(DateTime startTime, int i)
         {
             var addDayToStartTime = startTime.AddDays(i);
             return csvFileDir + @"\OpenHardwareMonitorLog-" + addDayToStartTime.ToString("yyyy-MM-dd") + @".csv";
+
+            
         }
 
-
-
         
+
+
     }
 }
 

@@ -5,31 +5,19 @@ namespace SystemLogger
 {
     public class TargetProcess //represents one of the classes in the apps watch list
     {
+        string processName;
         double cpuLoadAvg = 0, cpuTempMax = 0, cpuTempAvg = 0;
         double gpuLoadAvg = 0, gpuTempMax = 0, gpuTempAvg = 0;
         double numReadings = 0;
         DateTime startTime, endTime;
         TimeSpan sessionLength;
-        int instanceCount;
 
-        public TargetProcess()
+        public TargetProcess(string processName)
         {
+            this.processName = processName;
             startTime = DateTime.Now;
-            instanceCount = 1;
         }
 
-        public void incrementInstanceCount()
-        {
-            instanceCount ++;
-        }
-        public void decrementInstanceCount()
-        {
-            instanceCount --;
-        }
-        public int getInstanceCount()
-        {
-            return instanceCount;
-        }
         public DateTime getStartTime()
         {
             return startTime;
@@ -38,6 +26,11 @@ namespace SystemLogger
         public DateTime getEndTime()
         {
             return endTime;
+        }
+
+        public string getPorcessName()
+        {
+            return processName;
         }
 
         public void setEndTime()
@@ -72,6 +65,7 @@ namespace SystemLogger
             gpuTempAvg /= numReadings;
             gpuLoadAvg /= numReadings;
         }
+
 
         public void writeToLogFile(string filePath)
         {

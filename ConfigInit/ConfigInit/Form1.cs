@@ -13,9 +13,9 @@ namespace ConfigInit
             InitializeComponent();
            // string homeDir = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, @"..\"));
             //string homeDir = Path.GetFullPath(Environment.CurrentDirectory);
-            string homeDir =Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), @"..\");
+            string homeDir = Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), @"..\");
 
-            logFilePath.Text = Path.Combine(homeDir, @"LogFiles");
+            logFilePath.Text = homeDir;
             csvFilePath.Text = Path.Combine(homeDir, @"OpenHardwareMonitor");
            
 
@@ -112,7 +112,7 @@ namespace ConfigInit
         public void writeToLog()
         {
             //string filePath = logFilePath.Text + @"\config.txt";
-            string filePath = Path.Combine(logFilePath.Text, "config.txt");
+            string filePath = Path.Combine(Environment.CurrentDirectory, "config.txt");
             using (StreamWriter writer = File.AppendText(filePath))
             {
                 writer.WriteLine("logFilePath={0}", logFilePath.Text);
