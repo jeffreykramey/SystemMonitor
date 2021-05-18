@@ -112,7 +112,7 @@ namespace SystemLogger
 
         public static bool checkCurrentlyRunningProcesses()
         {
-            bool ret = false;
+            bool ret = true;
             Process[] allProcesses = Process.GetProcesses();
             foreach(Process proc in allProcesses)
             {
@@ -120,7 +120,11 @@ namespace SystemLogger
                 {
                     initRunningApps(proc);
                     Console.WriteLine("{0} added to list", proc.ProcessName);
-                    ret = true;
+                    if (proc.ProcessName != "NiceHashQuickMiner")
+                    {
+                        ret = false;
+                    }
+                    
 
                 }
             }
