@@ -61,9 +61,10 @@ namespace SystemLogger
 
            
 
-            NotifyIcon tray = new NotifyIcon();
-            tray.Icon = new System.Drawing.Icon(Path.Combine(Environment.CurrentDirectory, @"pussyCat.ico"));
-            
+            NotifyIcon trayIcon = new NotifyIcon();
+            trayIcon.Icon = new System.Drawing.Icon(Path.Combine(Environment.CurrentDirectory, @"pussyCat.ico"));
+            trayIcon.Visible = true;
+
             string configFilePath = Path.Combine(Environment.CurrentDirectory, @"config.txt");
             Console.WriteLine(configFilePath);
             if (!File.Exists(configFilePath))
@@ -76,11 +77,9 @@ namespace SystemLogger
             logFilesPath = Path.Combine(logFilesPath, "LogFiles");
             Directory.CreateDirectory(logFilesPath); //make a LogFiles dir if it doesn't already exist
             startOpenHwMonitor();
-            bool startNiceHash = checkCurrentlyRunningProcesses(); 
-            if (startNiceHash)
-            {
-                startMiner();
-            }
+            checkCurrentlyRunningProcesses();
+            startMiner();
+
             
 
             ManagementScope scope = new ManagementScope(Environment.MachineName + @"\root\cimv2"); 
@@ -98,10 +97,9 @@ namespace SystemLogger
                 new WqlEventQuery("SELECT * FROM Win32_ProcessStopTrace"));
                 stopWatch.EventArrived += new EventArrivedEventHandler(stopWatchingApp);
                 stopWatch.Start();
-                Console.WriteLine("Press any key to exit");
-                while (!Console.KeyAvailable) System.Threading.Thread.Sleep(50);
-                startWatch.Stop();
-                stopWatch.Stop();
+                while (true) System.Threading.Thread.Sleep(50);
+                //startWatch.Stop(); //this doesn't seem to be needed
+                //stopWatch.Stop();
             }
             catch (ManagementException e)
             {
@@ -110,9 +108,8 @@ namespace SystemLogger
             }
         }
 
-        public static bool checkCurrentlyRunningProcesses()
+        public static void checkCurrentlyRunningProcesses()
         {
-            bool ret = true;
             Process[] allProcesses = Process.GetProcesses();
             foreach(Process proc in allProcesses)
             {
@@ -120,15 +117,8 @@ namespace SystemLogger
                 {
                     initRunningApps(proc);
                     Console.WriteLine("{0} added to list", proc.ProcessName);
-                    if (proc.ProcessName != "NiceHashQuickMiner")
-                    {
-                        ret = false;
-                    }
-                    
-
                 }
             }
-            return ret;
         }
 
         static void startWatchingApp(object sender, EventArrivedEventArgs e)
@@ -178,7 +168,12 @@ namespace SystemLogger
                     
                 runningApps.Remove(pid);
                 processEndOfWatch(tp);
-                startMiner();
+                if(runningApps.Count == 0)
+                {
+                    Console.WriteLine("Started in stopWarchingApp");
+                    startMiner();
+                }
+                
             }
             else
             {
@@ -195,7 +190,6 @@ namespace SystemLogger
             {
                 string csvFilePath = buildCsvFilePath(tp.getStartTime(), i);
                 TextFieldParser parser = initCsvParser(csvFilePath);
-                Console.WriteLine(csvFilePath);
                 parseComponentReadings(ref parser, ref tp);
                 tp.averageTempAndLoadData();
                 writeToLog(tp);

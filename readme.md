@@ -22,6 +22,8 @@ and unzip the package in your desired directory. To conduct the initial set-up y
 ## Versions
 **SystemLogger 0.3-beta**
 * Fixed logic in `checkCurrentlyRunningProcesses()` so that NiceHash is only launched when other target processes aren't running.
+* Fixed bug that caused NiceHash to immediately reopen after being forced closed.
+* Exit on keypress removed.
 
 **SystemLogger 0.2-beta**
 * `appsToWatch` key is now a `uint` to track process IDs instead of the process name which was
