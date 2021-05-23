@@ -22,7 +22,7 @@ and unzip the package in your desired directory. To conduct the initial set-up y
 ## Versions
 **SystemLogger 0.4-beta**
 * NiceHash no longer automatically restarts if it is manually closed when it is the only monitored process.
-* If an application is being activley monitored over a multi-day period, all data from this period is now condensed into a single log entry for simplicity. 
+* If an application is being actively monitored over a multi-day period, all data from this period is now condensed into a single log entry for simplicity. 
 
 
 **SystemLogger 0.3-beta**
