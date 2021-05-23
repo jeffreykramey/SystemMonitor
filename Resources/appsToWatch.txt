@@ -1,0 +1,14 @@
+ModernWarfare.exe
+vermintide2.exe
+RocketLeague.exe
+starwarsbattlefrontii.exe
+RAGE2.exe
+FSD.exe
+NiceHashQuickMiner.exe
+GTA5.exe
+CivilizationVI_DX11.exe
+CivilizationVI_DX12.exe
+helldivers.exe
+DarkSoulsIII.exe
+Risk of Rain 2.exe
+notepad.exe

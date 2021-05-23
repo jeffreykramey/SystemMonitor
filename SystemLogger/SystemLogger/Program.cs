@@ -13,7 +13,6 @@ namespace SystemLogger
 {
     class Program
     {
-
         [DllImport("Kernel32")]
         private static extern bool SetConsoleCtrlHandler(EventHandler handler, bool add);
         private delegate bool EventHandler(CtrlType sig);
@@ -57,10 +56,6 @@ namespace SystemLogger
 
         static void Main(string[] args)
         {
-
-
-           
-
             NotifyIcon trayIcon = new NotifyIcon();
             trayIcon.Icon = new System.Drawing.Icon(Path.Combine(Environment.CurrentDirectory, @"pussyCat.ico"));
             trayIcon.Visible = true;
@@ -89,7 +84,6 @@ namespace SystemLogger
                 closureHandler += new EventHandler(Handler);
                 SetConsoleCtrlHandler(closureHandler, true);
                 ConsoleWindow.QuickEditMode(false); //turns console's quick edit mode off
-
                 ManagementEventWatcher startWatch = new ManagementEventWatcher(new WqlEventQuery("SELECT * FROM Win32_ProcessStartTrace"));
                 startWatch.EventArrived += new EventArrivedEventHandler(startWatchingApp);
                 startWatch.Start();
@@ -98,8 +92,6 @@ namespace SystemLogger
                 stopWatch.EventArrived += new EventArrivedEventHandler(stopWatchingApp);
                 stopWatch.Start();
                 while (true) System.Threading.Thread.Sleep(50);
-                //startWatch.Stop(); //this doesn't seem to be needed
-                //stopWatch.Stop();
             }
             catch (ManagementException e)
             {
@@ -115,8 +107,8 @@ namespace SystemLogger
             {
                 if (appsToWatch.Contains(proc.ProcessName + @".exe"))
                 {
-                    initRunningApps(proc);
-                    Console.WriteLine("{0} added to list", proc.ProcessName);
+                    addProcessToRunningApps((uint)proc.Id, proc.ProcessName + @".exe");
+                    Console.WriteLine("{0} added to list of currently running apps that should be watched.", proc.ProcessName);
                 }
             }
         }
@@ -138,11 +130,6 @@ namespace SystemLogger
 
         }
 
-        static void initRunningApps(Process proc)
-        {
-            addProcessToRunningApps((uint) proc.Id, proc.ProcessName + @".exe");
-        }
-
         static void addProcessToRunningApps(uint pid, string processName)
         {
             if (!runningApps.ContainsKey(pid))
@@ -156,6 +143,7 @@ namespace SystemLogger
 
         static void stopWatchingApp(object sender, EventArrivedEventArgs e)
         {
+            
             String processName = (String)e.NewEvent.Properties["ProcessName"].Value;
             uint pid = (uint)e.NewEvent.Properties["ProcessID"].Value;
             
@@ -165,21 +153,29 @@ namespace SystemLogger
                 Console.ForegroundColor = ConsoleColor.Red;
                 Console.WriteLine("Killing Target Process: {0}, {1}", processName, pid);
                 Console.ForegroundColor = ConsoleColor.White;
-                    
+
+                if(runningApps.Count == 1)
+                {
+                    if (!isNiceHashLastApp()) //prevents NiceHash from being restarted immidiatley if it is manually closed
+                    {
+                        startMiner(); 
+                    }
+                }
                 runningApps.Remove(pid);
                 processEndOfWatch(tp);
-                if(runningApps.Count == 0)
-                {
-                    Console.WriteLine("Started in stopWarchingApp");
-                    startMiner();
-                }
-                
+
             }
             else
             {
                 Console.WriteLine("Unwatched process stopped: {0}, {1}", processName, pid);
             }
             
+        }
+
+        static bool isNiceHashLastApp()
+        {
+            TargetProcess tp = runningApps.Values.First();
+            return (tp.getPorcessName() == "NiceHashQuickMiner");
         }
 
         static void processEndOfWatch(TargetProcess tp)
@@ -191,9 +187,9 @@ namespace SystemLogger
                 string csvFilePath = buildCsvFilePath(tp.getStartTime(), i);
                 TextFieldParser parser = initCsvParser(csvFilePath);
                 parseComponentReadings(ref parser, ref tp);
-                tp.averageTempAndLoadData();
-                writeToLog(tp);
             }
+            tp.averageTempAndLoadData();
+            writeToLog(tp);
         }
 
         static void prepareProgramForClose()
@@ -251,21 +247,11 @@ namespace SystemLogger
             ManagementObjectSearcher processSearcher = new ManagementObjectSearcher
                     ("Select * From Win32_Process Where ParentProcessID=" + pid);
             ManagementObjectCollection processCollection = processSearcher.Get();
-
-            try
+            Process proc = Process.GetProcessById(pid);
+            if (!proc.HasExited)
             {
-                Process proc = Process.GetProcessById(pid);
-                if (!proc.HasExited)
-                {
-                    proc.Kill();
-                }
-                    
+                proc.Kill();
             }
-            catch (ArgumentException)
-            {
-                // Process already exited.
-            }
-
             if (processCollection != null)
             {
                 foreach (ManagementObject manObj in processCollection)
@@ -315,7 +301,7 @@ namespace SystemLogger
             int rowGpuTemp = Int32.Parse(row[translator.gpuTempCol]);
             tp.updateTemperatures(rowCpuTemp, rowGpuTemp);
             double cpuLoad = Convert.ToDouble(row[translator.cpuLoadCol]);
-            double gpuLoad= Convert.ToDouble(row[translator.gpuLoadCol]);
+            double gpuLoad = Convert.ToDouble(row[translator.gpuLoadCol]);
             tp.addToLoadData(cpuLoad, gpuLoad);
         }
 
@@ -399,15 +385,12 @@ namespace SystemLogger
             Console.ForegroundColor = ConsoleColor.Blue;
             Console.WriteLine("Wrote log for {0} here: {1}", tp.getPorcessName(), filePath);
             Console.ForegroundColor = ConsoleColor.White;
-            
         }
 
         static public string buildCsvFilePath(DateTime startTime, int i)
         {
             var addDayToStartTime = startTime.AddDays(i);
-            return csvFileDir + @"\OpenHardwareMonitorLog-" + addDayToStartTime.ToString("yyyy-MM-dd") + @".csv";
-
-            
+            return csvFileDir + @"\OpenHardwareMonitorLog-" + addDayToStartTime.ToString("yyyy-MM-dd") + @".csv";          
         }
 
         

@@ -66,7 +66,6 @@ namespace SystemLogger
             gpuLoadAvg /= numReadings;
         }
 
-
         public void writeToLogFile(string filePath)
         {
             using (StreamWriter writer = File.AppendText(filePath))
